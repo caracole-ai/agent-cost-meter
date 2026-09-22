@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+# Outputs of cost-meter runs: real usage data, never committed
+*.out.json
+*.out.csv
+runs/
