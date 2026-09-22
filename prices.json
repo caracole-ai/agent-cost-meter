@@ -1,0 +1,54 @@
+{
+  "currency": "USD",
+  "unit": "per million tokens",
+  "retrieved": "2026-09-22",
+  "sources": {
+    "prices": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "model_ids": "https://platform.claude.com/docs/en/about-claude/models/overview"
+  },
+  "notes": [
+    "Anthropic first-party API list prices, read on the official pricing page on the date above.",
+    "cache_multipliers apply to the model's input price: 5-minute cache write 1.25x, 1-hour cache write 2x, cache read 0.1x (0.025x on Claude Fable 5.1, set per model below).",
+    "Long context: Claude 4.6 and later models are billed at standard rates across the full 1M context window (same page, 'Long context pricing').",
+    "Fast mode (Opus 5): its own input/output prices; the cache multipliers stack on top (same page, 'Fast mode pricing').",
+    "inference_geo 'us' is billed 1.1x on every token category for Claude 4.6 and later (same page, 'Data residency').",
+    "Web search (server tool): 10 USD per 1,000 searches, on top of token costs; a search that errors is not billed (same page, 'Web search tool'). It is a per-search fee, not a token price: the inference_geo multiplier, which the page applies to token categories, is not applied to it.",
+    "Only models whose API ID is confirmed on the models overview page are listed. Any other model makes cost-meter stop with an error naming it: add it here from the official page, never guess."
+  ],
+  "cache_multipliers": {
+    "cache_write_5m": 1.25,
+    "cache_write_1h": 2.0,
+    "cache_read": 0.1
+  },
+  "web_search_per_1000_searches": 10.0,
+  "inference_geo_multipliers": {
+    "us": 1.1
+  },
+  "models": {
+    "claude-fable-5-1": {
+      "name": "Claude Fable 5.1",
+      "input": 10.0,
+      "output": 50.0,
+      "cache_multipliers": { "cache_read": 0.025 }
+    },
+    "claude-opus-5": {
+      "name": "Claude Opus 5",
+      "input": 5.0,
+      "output": 25.0,
+      "fast": { "input": 10.0, "output": 50.0 }
+    },
+    "claude-sonnet-5": {
+      "name": "Claude Sonnet 5",
+      "input": 2.0,
+      "output": 10.0
+    },
+    "claude-haiku-4-5-20251001": {
+      "name": "Claude Haiku 4.5",
+      "input": 1.0,
+      "output": 5.0
+    }
+  },
+  "aliases": {
+    "claude-haiku-4-5": "claude-haiku-4-5-20251001"
+  }
+}

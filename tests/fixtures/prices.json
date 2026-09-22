@@ -1,0 +1,37 @@
+{
+  "currency": "USD",
+  "unit": "per million tokens",
+  "retrieved": "2026-01-01",
+  "sources": {
+    "prices": "test fixture, not real prices"
+  },
+  "cache_multipliers": {
+    "cache_write_5m": 1.25,
+    "cache_write_1h": 2.0,
+    "cache_read": 0.1
+  },
+  "web_search_per_1000_searches": 20.0,
+  "inference_geo_multipliers": {
+    "us": 1.1
+  },
+  "models": {
+    "claude-test-large": {
+      "input": 1.0,
+      "output": 10.0,
+      "fast": {
+        "input": 2.0,
+        "output": 20.0
+      }
+    },
+    "claude-test-small": {
+      "input": 0.5,
+      "output": 2.0,
+      "cache_multipliers": {
+        "cache_read": 0.2
+      }
+    }
+  },
+  "aliases": {
+    "claude-test-l": "claude-test-large"
+  }
+}
