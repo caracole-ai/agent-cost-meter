@@ -2,7 +2,8 @@
 
 Expected costs are computed by hand from tests/fixtures/prices.json (USD per million tokens):
 claude-test-large: input 1, output 10; claude-test-small: input 0.5, output 2, cache read 0.2x;
-cache writes 1.25x (5 min) and 2x (1 h), cache read 0.1x of the input price.
+cache writes 1.25x (5 min) and 2x (1 h), cache read 0.1x of the input price;
+web search 20 USD per 1,000 searches.
 """
 
 import contextlib
@@ -16,7 +17,7 @@ from pathlib import Path
 
 from cost_meter.cli import main, parse_since
 from cost_meter.pricing import PricingError, UnknownModelError, load_prices
-from cost_meter.report import group, price_turns, select_turns, totals, waste
+from cost_meter.report import group, price_turns, select_turns, totals, turn_record, waste
 from cost_meter.transcripts import TranscriptError, project_slug, read_sessions
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -37,6 +38,11 @@ REQ_D2 = (5 + 21000 * 0.1 + 60 * 10) * M
 REQ_E = (5 + 22000 * 0.1 + 30 * 10) * M
 REQ_O = (1000 + 1000 * 10) * M
 REQ_X = (2000 * 0.5 + 500 * 2) * M
+SEARCH = 20 / 1000  # one web search at the fixture price
+REQ_W1 = (10 * 1 + 20 * 10) * M + 2 * SEARCH  # final usage (output 20), plus 2 searches
+REQ_W2 = (5 + 1000 * 0.1 + 10 * 10) * M
+REQ_T1 = (100 * 0.5 + 1 * 2) * M + 1 * SEARCH  # output stuck at the partial count: 1
+REQ_T2 = (20 * 0.5 + 8 * 2) * M
 TURN_1 = REQ_A + REQ_B + REQ_C + REQ_S1 + REQ_S2
 TURN_2 = REQ_D + REQ_D2
 TURN_3 = REQ_E
@@ -225,6 +231,65 @@ class PricingTests(unittest.TestCase):
         prices = load_prices()
         self.assertRegex(prices.retrieved, r"^\d{4}-\d{2}-\d{2}$")
         self.assertTrue(prices.sources["prices"].startswith("https://"))
+
+
+class WebSearchAndIncompleteUsageTests(unittest.TestCase):
+    """tests/fixtures/web-session: WebSearch tool results with searchCount, and a sub-agent
+    request whose lines all have stop_reason null (written before its final usage)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="cost-meter-test-")
+        project = Path(self.tmp) / "-tmp-web-project"
+        project.mkdir()
+        shutil.copy(FIXTURES / "web-session.jsonl", project / "web-session.jsonl")
+        shutil.copytree(FIXTURES / "web-session", project / "web-session")
+        self.root = Path(self.tmp)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def test_web_searches_are_priced_on_the_request_that_called_the_tool(self):
+        turns, _ = load(self.root, since=None)
+        reqs = {r.request_id: r for t in turns for r in t.requests}
+        self.assertEqual({k: r.web_search_count for k, r in reqs.items()},
+                         {"req_W1": 2, "req_W2": 0, "req_T1": 1, "req_T2": 0})
+        for rid, expected in (("req_W1", REQ_W1), ("req_W2", REQ_W2), ("req_T1", REQ_T1), ("req_T2", REQ_T2)):
+            self.assertAlmostEqual(reqs[rid].cost, expected, places=12, msg=rid)
+        self.assertEqual(turn_record(turns[0])["web_searches"], 3)
+
+    def test_request_without_final_usage_is_counted_not_guessed(self):
+        turns, stats = load(self.root, since=None)
+        reqs = {r.request_id: r for t in turns for r in t.requests}
+        self.assertTrue(reqs["req_T1"].incomplete_usage)
+        self.assertEqual(reqs["req_T1"].tokens["output"], 1)  # the partial count, not an estimate
+        self.assertFalse(reqs["req_W1"].incomplete_usage)  # its second line carries the final usage
+        self.assertEqual(reqs["req_W1"].tokens["output"], 20)
+        self.assertEqual(stats.incomplete_usage, 1)
+        code, out, _ = run_cli("--projects-dir", str(self.root), "--prices", TEST_PRICES)
+        self.assertEqual(code, 0)
+        self.assertIn("1 requests written without their final usage", out)
+
+    def test_lines_without_the_stop_reason_field_are_not_flagged(self):
+        with FixtureDir() as root:
+            _, stats = load(root, sessions=["session"])
+        self.assertEqual(stats.incomplete_usage, 0)
+
+    def test_web_search_without_a_price_is_an_error(self):
+        data = json.loads(Path(TEST_PRICES).read_text(encoding="utf-8"))
+        del data["web_search_per_1000_searches"]
+        prices_path = Path(self.tmp) / "prices-no-search.json"
+        prices_path.write_text(json.dumps(data), encoding="utf-8")
+        prices = load_prices(str(prices_path))
+        tokens = {"input": 1, "cache_write_5m": 0, "cache_write_1h": 0, "cache_read": 0, "output": 1}
+        self.assertAlmostEqual(prices.cost("claude-test-large", tokens), 11 * M)  # no search: no price needed
+        with self.assertRaises(PricingError):
+            prices.cost("claude-test-large", tokens, web_searches=1)
+
+    def test_geography_multiplier_does_not_apply_to_the_search_fee(self):
+        prices = load_prices(TEST_PRICES)
+        tokens = {"input": 1000, "cache_write_5m": 0, "cache_write_1h": 0, "cache_read": 0, "output": 0}
+        self.assertAlmostEqual(prices.cost("claude-test-large", tokens, inference_geo="us", web_searches=1),
+                               1000 * M * 1.1 + SEARCH)
 
 
 class ReportAndCliTests(unittest.TestCase):

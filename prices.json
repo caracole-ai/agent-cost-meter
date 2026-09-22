@@ -12,6 +12,7 @@
     "Long context: Claude 4.6 and later models are billed at standard rates across the full 1M context window (same page, 'Long context pricing').",
     "Fast mode (Opus 5): its own input/output prices; the cache multipliers stack on top (same page, 'Fast mode pricing').",
     "inference_geo 'us' is billed 1.1x on every token category for Claude 4.6 and later (same page, 'Data residency').",
+    "Web search (server tool): 10 USD per 1,000 searches, on top of token costs; a search that errors is not billed (same page, 'Web search tool'). It is a per-search fee, not a token price: the inference_geo multiplier, which the page applies to token categories, is not applied to it.",
     "Only models whose API ID is confirmed on the models overview page are listed. Any other model makes cost-meter stop with an error naming it: add it here from the official page, never guess."
   ],
   "cache_multipliers": {
@@ -19,6 +20,7 @@
     "cache_write_1h": 2.0,
     "cache_read": 0.1
   },
+  "web_search_per_1000_searches": 10.0,
   "inference_geo_multipliers": {
     "us": 1.1
   },

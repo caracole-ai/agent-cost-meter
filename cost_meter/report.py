@@ -23,7 +23,7 @@ def price_turns(turns: List[Turn], prices: Prices) -> None:
     prices.check_models(counts)
     for t in turns:
         for r in t.requests:
-            r.cost = prices.cost(r.model, r.tokens, r.speed, r.inference_geo)
+            r.cost = prices.cost(r.model, r.tokens, r.speed, r.inference_geo, r.web_search_count)
 
 
 def select_turns(sessions: List[Session], since: Optional[datetime]) -> List[Turn]:
@@ -83,6 +83,7 @@ def turn_record(turn: Turn) -> dict:
         "subagent_requests": len(turn.requests) - len(turn.main_requests),
         "subagents": turn.subagents,
         "tool_uses": turn.tool_uses,
+        "web_searches": sum(r.web_search_count for r in turn.requests),
         "models": sorted({r.model for r in turn.requests}),
         "tokens": tokens,
         "cost_usd": sum(r.cost for r in turn.requests),
@@ -240,6 +241,9 @@ def _stats_notes(stats: ReadStats) -> List[str]:
         notes.append(f"{stats.duplicate_requests} requests copied across files counted once")
     if stats.synthetic_lines:
         notes.append(f"{stats.synthetic_lines} '<synthetic>' API-error lines (no tokens) not counted as requests")
+    if stats.incomplete_usage:
+        notes.append(f"{stats.incomplete_usage} requests written without their final usage "
+                     "(output tokens under-recorded)")
     if stats.unattached_subagents:
         notes.append(f"{stats.unattached_subagents} sub-agent files not linked to a turn")
     return notes

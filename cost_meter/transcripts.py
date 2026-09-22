@@ -17,6 +17,10 @@ One JSON object per line. What this module relies on:
 - sub-agent lines live in their own file (`isSidechain: true`), not in the main file.
 - `message.model == "<synthetic>"` marks a line Claude Code wrote itself (API error such as
   a 429), with zero usage: not an API request.
+- the final usage of a request comes with its `stop_reason`. A request whose lines all carry
+  `stop_reason: null` was written before that final usage: its output_tokens is a partial
+  count (seen on sub-agent lines). It cannot be recovered; such requests are counted.
+- a WebSearch tool result carries `toolUseResult.searchCount`: the searches billed for it.
 """
 
 from __future__ import annotations
@@ -77,6 +81,18 @@ class Request:
     has_text: bool = False
     aborted: bool = False
     cost: float = 0.0
+    web_searches: Dict[str, int] = field(default_factory=dict)  # tool_use id -> searchCount
+    stop_known: bool = False  # a line of this request has the stop_reason field
+    stop_seen: bool = False   # a line of this request has a non-null stop_reason
+
+    @property
+    def web_search_count(self) -> int:
+        return sum(self.web_searches.values())
+
+    @property
+    def incomplete_usage(self) -> bool:
+        """Written before its final usage: output_tokens is under-recorded."""
+        return self.stop_known and not self.stop_seen
 
 
 @dataclass
@@ -152,6 +168,7 @@ class ReadStats:
     synthetic_lines: int = 0
     duplicate_requests: int = 0
     unattached_subagents: int = 0
+    incomplete_usage: int = 0
     files: int = 0
 
 
@@ -228,6 +245,7 @@ class _SessionReader:
         self.special: Dict[str, Turn] = {}
         self.requests: Dict[str, Tuple[Request, Turn]] = {}
         self.tool_use_turn: Dict[str, Turn] = {}
+        self.tool_use_request: Dict[str, Request] = {}
 
     def _turn(self, prompt_id: Optional[str]) -> Turn:
         turn = Turn(self.session_id, self.project, self.cwd, prompt_id)
@@ -274,12 +292,16 @@ class _SessionReader:
                 req.timestamp = min(req.timestamp or ts, ts)
                 req.end = max(req.end or ts, ts)
             turn = owner
+        if "stop_reason" in message:
+            req.stop_known = True
+            req.stop_seen = req.stop_seen or bool(message["stop_reason"])
         for block in _content_blocks(obj):
             if not isinstance(block, dict):
                 continue
             if block.get("type") == "tool_use" and block.get("id"):
                 req.tool_use_ids.add(block["id"])
                 self.tool_use_turn[block["id"]] = turn
+                self.tool_use_request[block["id"]] = req
             elif block.get("type") == "text" and str(block.get("text", "")).strip():
                 req.has_text = True
         if obj.get("isAbortedMidStream"):
@@ -290,6 +312,18 @@ class _SessionReader:
         for block in _content_blocks(obj):
             if isinstance(block, dict) and block.get("type") == "tool_result" and block.get("is_error"):
                 turn.retries += 1
+
+    def _count_searches(self, obj: dict) -> None:
+        """Web searches billed for a WebSearch tool result, set (not added) on the request
+        that called the tool, so a copied result line is not counted twice."""
+        result = obj.get("toolUseResult")
+        if not isinstance(result, dict) or not isinstance(result.get("searchCount"), int):
+            return
+        for block in _content_blocks(obj):
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                req = self.tool_use_request.get(block.get("tool_use_id") or "")
+                if req is not None:
+                    req.web_searches[block["tool_use_id"]] = result["searchCount"]
 
     def read_main(self) -> None:
         current: Optional[Turn] = None
@@ -314,6 +348,7 @@ class _SessionReader:
                 if not turn.prompt:
                     turn.prompt = _human_text(obj)
                 self._count_errors(obj, turn)
+                self._count_searches(obj)
             elif kind == "assistant":
                 self._add_assistant(obj, current or self._special(NO_PROMPT), source, sidechain=False)
 
@@ -361,6 +396,7 @@ class _SessionReader:
                 self._add_assistant(obj, turn, str(path), sidechain=True)
             elif obj.get("type") == "user":
                 self._count_errors(obj, turn)
+                self._count_searches(obj)
 
     def session(self) -> Session:
         turns = [t for t in self.turns if t.requests or t.first_line is not None]
@@ -415,6 +451,7 @@ def read_sessions(projects_dir: Path, project: Optional[str] = None,
         reader.read_subagents()
         sessions.append(reader.session())
     _dedupe_across_sessions(sessions, stats)
+    stats.incomplete_usage = sum(r.incomplete_usage for s in sessions for t in s.turns for r in t.requests)
     if session_ids:
         wanted = set(session_ids)
         missing = wanted - {s.session_id for s in sessions}

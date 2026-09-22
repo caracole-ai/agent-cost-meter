@@ -10,6 +10,7 @@
     "cache_write_1h": 2.0,
     "cache_read": 0.1
   },
+  "web_search_per_1000_searches": 20.0,
   "inference_geo_multipliers": {
     "us": 1.1
   },

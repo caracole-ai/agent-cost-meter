@@ -23,6 +23,10 @@ FAST_SPEED = "fast"
 # usage.inference_geo values billed at standard rates (global routing, or not reported).
 STANDARD_GEOS = (None, "not_available", "global")
 
+# Key of the web search fee in prices.json: USD per 1,000 searches (a fee, not a token price).
+WEB_SEARCH_PRICE_KEY = "web_search_per_1000_searches"
+SEARCHES_PER_PRICE_UNIT = 1000
+
 DEFAULT_PRICES_PATH = Path(__file__).resolve().parent.parent / "prices.json"
 
 PER_TOKENS = 1_000_000
@@ -67,6 +71,11 @@ class Prices:
             k: _number(v, f"{path}: inference_geo_multipliers.{k}")
             for k, v in data.get("inference_geo_multipliers", {}).items()
         }
+        # None when the file has no web search price: an error only if a search must be priced.
+        self.web_search_usd: Optional[float] = None
+        if WEB_SEARCH_PRICE_KEY in data:
+            per_unit = _number(data[WEB_SEARCH_PRICE_KEY], f"{path}: {WEB_SEARCH_PRICE_KEY}")
+            self.web_search_usd = per_unit / SEARCHES_PER_PRICE_UNIT
         self.models: Dict[str, dict] = {}
         for model, entry in data["models"].items():
             where = f"{path}: models.{model}"
@@ -101,7 +110,7 @@ class Prices:
             raise UnknownModelError(unknown, self.path)
 
     def cost(self, model: str, tokens: Mapping[str, int], speed: Optional[str] = None,
-             inference_geo: Optional[str] = None) -> float:
+             inference_geo: Optional[str] = None, web_searches: int = 0) -> float:
         entry = self.resolve(model)
         if entry is None:
             raise UnknownModelError({model: 1}, self.path)
@@ -127,7 +136,13 @@ class Prices:
             + tokens["cache_read"] * base_in * mult["cache_read"]
             + tokens["output"] * base_out
         )
-        return usd * geo / PER_TOKENS
+        fee = 0.0
+        if web_searches:
+            if self.web_search_usd is None:
+                raise PricingError(f"{self.path}: {web_searches} web searches but no {WEB_SEARCH_PRICE_KEY!r}; "
+                                   "add it from the provider's official pricing page")
+            fee = web_searches * self.web_search_usd  # per-search fee: the geography multiplier is for tokens
+        return usd * geo / PER_TOKENS + fee
 
 
 def load_prices(path: Optional[str] = None) -> Prices:
